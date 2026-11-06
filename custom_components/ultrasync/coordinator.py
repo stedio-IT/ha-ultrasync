@@ -1,16 +1,8 @@
 """Provides the UltraSync DataUpdateCoordinator."""
 from datetime import timedelta
 import logging
-import threading
 
-try:
-    # Python 3.11+ has this built in; newer Home Assistant no longer ships
-    # the async_timeout package
-    from asyncio import timeout
-
-except ImportError:
-    from async_timeout import timeout
-
+from async_timeout import timeout
 from homeassistant.const import CONF_HOST, CONF_PIN, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -18,6 +10,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import ultrasync
 
 from .const import DOMAIN, SENSOR_UPDATE_LISTENER
+from .comnav_consistency import install_consistency_fixes
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,20 +26,14 @@ class UltraSyncDataUpdateCoordinator(DataUpdateCoordinator):
             host=config[CONF_HOST],
         )
 
+        install_consistency_fixes(self.hub)
+
         self._init = False
-
-        # Polls and alarm panel commands run in different worker threads, but
-        # share one panel session; this lock makes them take turns
-        self.hub_lock = threading.Lock()
-
-        # The areas from the last successful poll (used by the alarm panels)
-        self.areas = []
 
         # Used to track delta (for change tracking)
         self._area_delta = {}
         self._zone_delta = {}
         self._output_delta = {}
-        self._history_delta = {}
 
         update_interval = timedelta(seconds=options[CONF_SCAN_INTERVAL])
 
@@ -65,23 +52,18 @@ class UltraSyncDataUpdateCoordinator(DataUpdateCoordinator):
 
         # The hub can sometimes take a very long time to respond; wait
         async with timeout(10):
-            details = await self.hass.async_add_executor_job(self._details)
+            details = await self.hass.async_add_executor_job(lambda: self.hub.details(max_age_sec=0))
 
         # Update our details
         if details:
-            # Keep the latest areas for the alarm panels
-            self.areas = details["areas"]
-
             async_dispatcher_send(
                 self.hass,
                 SENSOR_UPDATE_LISTENER,
                 details["areas"],
                 details["zones"],
-                details["outputs"],
-                details["history_data"]
+                details["outputs"]
             )
 
-            # Process zone data
             for zone in details["zones"]:
                 if self._zone_delta.get(zone["bank"]) != zone["sequence"]:
                     self.hass.bus.fire(
@@ -101,28 +83,8 @@ class UltraSyncDataUpdateCoordinator(DataUpdateCoordinator):
                     "status"
                 ]
 
-            # Process history data (if present)
-            for history in details["history_data"]:
-                history_name = history["area_name"]
-                sensor_id = "history_name{}state".format(history_name)
-                state_value = "{} by {} at {}".format(history["action"], history["user"], history["timestamp"])
-                response[sensor_id] = state_value
-
-                # Fire event to get initial state
-                self.hass.bus.fire(
-                    "ultrasync_history_update",
-                    {
-                        "name": history_name,
-                        "status": history["action"],
-                        "timestamp": history["timestamp"],
-                        "user": history["user"],
-                    },
-                )
-
-            # Process area data
             for area in details["areas"]:
-                area_changed = self._area_delta.get(area["bank"]) != area["sequence"]
-                if area_changed:
+                if self._area_delta.get(area["bank"]) != area["sequence"]:
                     self.hass.bus.fire(
                         "ultrasync_area_update",
                         {
@@ -135,31 +97,11 @@ class UltraSyncDataUpdateCoordinator(DataUpdateCoordinator):
                     # Update our sequence
                     self._area_delta[area["bank"]] = area["sequence"]
 
-                    # Update our history when area state changes (if history data is present)
-                    if "history" in details and details["history_data"]:
-                        for history in details["history_data"]:
-                            history_name = history["area_name"]
-                            sensor_id = "history_name{}state".format(history_name)
-                            state_value = "{} by {} at {}".format(history["action"], history["user"], history["timestamp"])
-                            if history_name == area["name"]:
-                               self.hass.bus.fire(
-                                   "ultrasync_history_update",
-                                   {
-                                        "name": history_name,
-                                        "status": history["action"],
-                                        "timestamp": history["timestamp"],
-                                        "user": history["user"],
-                                   },
-                               )
-                               self._history_delta[history["area_name"]] = history["action"]
-                               response[sensor_id] = state_value
-
                 # Set our state:
                 response["area{:0>2}_state".format(area["bank"] + 1)] = area[
                     "status"
                 ]
 
-            # Process output data (if present)
             output_index = 1
             for output in details["outputs"]:
                 if self._output_delta.get(output["name"]) != output["state"]:
@@ -184,8 +126,3 @@ class UltraSyncDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Return our response
         return response
-
-    def _details(self) -> dict:
-        """Read the panel details, waiting for any alarm command to finish."""
-        with self.hub_lock:
-            return self.hub.details(max_age_sec=0)

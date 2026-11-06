@@ -2,21 +2,81 @@
 
 away:
   description: Set Alarm to Away
+  fields:
+    area:
+      name: Area
+      description: The partition/area to target (1, 2, etc.)
+      required: true
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 8
 
 stay:
   description: Set Alarm to Stay
+  fields:
+    area:
+      name: Area
+      description: The partition/area to target (1, 2, etc.)
+      required: true
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 8
 
 disarm:
   description: Set Alarm to Disarmed
+  fields:
+    area:
+      name: Area
+      description: The partition/area to target (1, 2, etc.)
+      required: true
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 8
 
 fire:
   description: Set Alarm to Fire Alarm
+  fields:
+    area:
+      name: Area
+      description: The partition/area to target (1, 2, etc.)
+      required: false
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 8
 
 medical:
   description: Set Alarm to Medical Alarm
+  fields:
+    area:
+      name: Area
+      description: The partition/area to target (1, 2, etc.)
+      required: false
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 8
 
 panic:
   description: Set Alarm to Panic Alarm
+  fields:
+    area:
+      name: Area
+      description: The partition/area to target (1, 2, etc.)
+      required: false
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 8
 
 bypass:
   description: Bypass a zone
